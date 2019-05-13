@@ -2,179 +2,248 @@
 
 namespace Tenfef\MYOB;
 
-use Guzzle\Http\Exception\BadResponseException;
+use InvalidArgumentException;
 use League\OAuth2\Client\Provider\AbstractProvider;
+use League\OAuth2\Client\Provider\Exception\IdentityProviderException;
 use League\OAuth2\Client\Token\AccessToken;
-use League\OAuth2\Client\Exception;
-use League\OAuth2\Client\Exception\IDPException as IDPException;
+use League\OAuth2\Client\Tool\BearerAuthorizationTrait;
+use Psr\Http\Message\ResponseInterface;
 
+/**
+ * Represents a generic service provider that may be used to interact with any
+ * OAuth 2.0 service provider, using Bearer token authentication.
+ */
 class Provider extends AbstractProvider
 {
-    public $headers = [
-        'x-myobapi-version' => 'v2',
-        'Accept' => 'application/json'
-    ];    
+    use BearerAuthorizationTrait;
 
-    public $authorizationHeader = 'Bearer';
+    /**
+     * @var string
+     */
+    private $urlAuthorize;
 
-    public $base_url = "https://api.myob.com/";
+    /**
+     * @var string
+     */
+    private $urlAccessToken;
 
-    public function getHeaders($token = NULL, $username = NULL, $password = NULL)
+    /**
+     * @var string
+     */
+    private $urlResourceOwnerDetails;
+
+    /**
+     * @var string
+     */
+    private $accessTokenMethod;
+
+    /**
+     * @var string
+     */
+    private $accessTokenResourceOwnerId;
+
+    /**
+     * @var array|null
+     */
+    private $scopes = null;
+
+    /**
+     * @var string
+     */
+    private $scopeSeparator;
+
+    /**
+     * @var string
+     */
+    private $responseError = 'error';
+
+    /**
+     * @var string
+     */
+    private $responseCode;
+
+    /**
+     * @var string
+     */
+    private $responseResourceOwnerId = 'id';
+
+    /**
+     * @param array $options
+     * @param array $collaborators
+     */
+    public function __construct(array $options = [], array $collaborators = [])
     {
-        $headers = parent::getHeaders($token);
-        $headers['x-myobapi-key'] = $this->clientId;        
-        if ($username) {
-            $headers['x-myobapi-cftoken'] = base64_encode($username . ":" . $password);            
-        }        
-        return $headers;
-    }
+        $options = array_merge([
+            'urlAuthorize'            => 'https://secure.myob.com/oauth2/account/authorize',
+            'urlAccessToken'          => 'https://secure.myob.com/oauth2/v1/authorize',
+            'urlResourceOwnerDetails' => 'https://api.myob.com/accountright/Info'
+        ], $options);
 
-    private function guzzleClient($token, $username, $password)
-    {
-        $headers = $this->getHeaders($token, $username, $password);
+        $this->assertRequiredOptions($options);
 
-        $client = $this->getHttpClient();
-        $client->setBaseUrl($this->base_url);
+        $possible = $this->getConfigurableOptions();
+        $configured = array_intersect_key($options, array_flip($possible));
 
-        if ($headers) {                
-            $client->setDefaultOption('headers', $headers);
+        foreach ($configured as $key => $value) {
+            $this->$key = $value;
         }
 
-        return $client;
-    }
+        // Remove all options that are only used locally
+        $options = array_diff_key($options, $configured);
 
-    public function urlAuthorize()
-    {
-        return "https://secure.myob.com/oauth2/account/authorize";
-    }
-
-    public function urlAccessToken()
-    {
-        return "https://secure.myob.com/oauth2/v1/authorize";
-    }
-
-    public function urlUserDetails(AccessToken $token)
-    {
-        throw new \RuntimeException('You are connected, but was no straight forward end point I could find for this :)');
-    }
-
-    public function userDetails($response, AccessToken $token)
-    {
-        return [];
-    }
-
-    private function handle_exception($e)
-    {
-        // @codeCoverageIgnoreStart
-        $response = $e->getResponse()->getBody();            
-        $result = $this->prepareResponse($response);
-        if (json_last_error())
-        {            
-            throw new \Exception($response);
-        }
-        if (isset($result['Errors']))
-        {
-            $error = $result['Errors'][0];
-            $message = $error['Name'] . ": " . $error['Message'];
-            if (! empty($error['AdditionalDetails']))
-            {
-                $message .= " " . $error['AdditionalDetails'];
-            }
-            
-            throw new \Exception($message);
-        }
-
-        throw $e;
+        parent::__construct($options, $collaborators);
     }
 
     /**
-     * Helper method that can be used to fetch API responses.
+     * Verifies that all required options have been passed.
      *
-     * @param  string      $path
-     * @param  AccessToken $token
-     * @param  boolean     $as_array
-     * @return array|object
+     * @param array $options
+     *
+     * @return void
+     * @throws InvalidArgumentException
      */
-    public function getApiResponse($url, $token, $username, $password)
-    {        
-        try {        
-            $client = $this->guzzleClient($token, $username, $password);
-            $request = $client->get($url)->send();
-            $response = $request->getBody();
-        } catch (BadResponseException $e) {            
-            $response = $this->handle_exception($e);
-        }
-
-        return json_decode($response);
-    }    
-
-    public function postFullResponse($URI, $data, $token, $username, $password)
+    private function assertRequiredOptions(array $options)
     {
-        try {                    
-            $client = $this->guzzleClient($token, $username, $password);
-            $options = [
-                'content-type' => 'application/json'
-            ];
-            $request = $client->post($URI, $options)->setBody(json_encode($data))->send();            
-            
-        } catch (BadResponseException $e) {            
-            $responseBody = $this->handle_exception($e);
+        $missing = array_diff_key(array_flip($this->getRequiredOptions()), $options);
+
+        if (!empty($missing)) {
+            throw new InvalidArgumentException(
+                'Required options not defined: ' . implode(', ', array_keys($missing))
+            );
         }
-
-        return $request;
     }
 
-    public function post($URI, $data, $token, $username, $password)
-    {        
-        $response = $this->postFullResponse($URI, $data, $token, $username, $password);
-
-        return json_decode($response->getBody());
-    }
-
-    public function putFullResponse($URI, $data, $token, $username, $password)
+    /**
+     * Returns all options that are required.
+     *
+     * @return array
+     */
+    protected function getRequiredOptions()
     {
-        try {                    
-            $client = $this->guzzleClient($token, $username, $password);
-            $options = [
-                'content-type' => 'application/json'
-            ];
-            $request = $client->put($URI, $options)->setBody(json_encode($data))->send();            
-            
-        } catch (BadResponseException $e) {            
-            $responseBody = $this->handle_exception($e);
-        }
-
-        return $request;
+        return [
+            'urlAuthorize',
+            'urlAccessToken',
+            'urlResourceOwnerDetails',
+        ];
     }
 
-    public function put($URI, $data, $token, $username, $password)
-    {        
-        $response = $this->putFullResponse($URI, $data, $token, $username, $password);
-
-        return json_decode($response->getBody());
-    }
-
-    public function deleteFullResponse($URI, $token, $username, $password)
+    /**
+     * Returns all options that can be configured.
+     *
+     * @return array
+     */
+    protected function getConfigurableOptions()
     {
-        try {                    
-            $client = $this->guzzleClient($token, $username, $password);
-            $options = [
-                'content-type' => 'application/json'
-            ];
-            $request = $client->delete($URI, $options)->send();
-            
-        } catch (BadResponseException $e) {            
-            $responseBody = $this->handle_exception($e);
+        return array_merge($this->getRequiredOptions(), [
+            'accessTokenMethod',
+            'accessTokenResourceOwnerId',
+            'scopeSeparator',
+            'responseError',
+            'responseCode',
+            'responseResourceOwnerId',
+            'scopes',
+        ]);
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public function getBaseAuthorizationUrl()
+    {
+        return $this->urlAuthorize;
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public function getBaseAccessTokenUrl(array $params)
+    {
+        return $this->urlAccessToken;
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public function getResourceOwnerDetailsUrl(AccessToken $token)
+    {
+        return $this->urlResourceOwnerDetails;
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public function getDefaultScopes()
+    {
+        return $this->scopes;
+    }
+
+    /**
+     * @inheritdoc
+     */
+    protected function getAccessTokenMethod()
+    {
+        return $this->accessTokenMethod ? : parent::getAccessTokenMethod();
+    }
+
+    /**
+     * @inheritdoc
+     */
+    protected function getAccessTokenResourceOwnerId()
+    {
+        return $this->accessTokenResourceOwnerId ? : parent::getAccessTokenResourceOwnerId();
+    }
+
+    /**
+     * @inheritdoc
+     */
+    protected function getScopeSeparator()
+    {
+        return $this->scopeSeparator ? : parent::getScopeSeparator();
+    }
+
+    /**
+     * @inheritdoc
+     */
+    protected function checkResponse(ResponseInterface $response, $data)
+    {
+        if (!empty($data[ $this->responseError ])) {
+            $error = $data[ $this->responseError ];
+            if (!is_string($error)) {
+                $error = var_export($error, true);
+            }
+            $code = $this->responseCode && !empty($data[ $this->responseCode ]) ? $data[ $this->responseCode ] : 0;
+            if (!is_int($code)) {
+                $code = intval($code);
+            }
+            throw new IdentityProviderException($error, $code, $data);
+        }
+    }
+
+    /**
+     * @inheritdoc
+     */
+    protected function createResourceOwner(array $response, AccessToken $token)
+    {
+        return new GenericResourceOwner($response, $this->responseResourceOwnerId);
+    }
+
+    public function getHeaders($token = null, $username = null, $password = null)
+    {
+        $headers = parent::getHeaders($token);
+        $headers['x-myobapi-key'] = $this->clientId;
+        if ($username) {
+            $headers['x-myobapi-cftoken'] = base64_encode($username . ":" . $password);
         }
 
-        return $request;
+        return $headers;
     }
 
-    public function delete($URI, $token, $username, $password)
-    {        
-        $response = $this->deleteFullResponse($URI, $token, $username, $password);
-
-        return json_decode($response->getBody());
+    protected function getDefaultHeaders()
+    {
+        return [
+            'x-myobapi-version' => 'v2',
+            'Accept-Encoding'   => 'gzip,deflate',
+            'Accept'            => 'application/json'
+        ];
     }
-
 }
