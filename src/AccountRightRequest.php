@@ -17,13 +17,13 @@ class AccountRightRequest
     function fetchWithPagination($uri)
     {
         $result = $this->fetch($uri);
-        if (!isset($result->Items)) {
+        if (!isset($result['Items'])) {
             return $result;
         }
 
-        $items = $result->Items;
-        if (!empty($result->NextPageLink)) {
-            $result = $this->fetchWithPagination($result->NextPageLink);
+        $items = $result['Items'];
+        if (!empty($result['NextPageLink'])) {
+            $result = $this->fetchWithPagination($result['NextPageLink']);
             $items = array_merge($items, $result);
         }
 
