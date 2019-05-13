@@ -2,6 +2,8 @@
 
 This package provides MYOB support for the PHP League's [OAuth 2.0 Client](https://github.com/thephpleague/oauth2-client).
 
+### fetch is the Only method that has been ported to the new Guzzle.
+
 ## Installation
 
 To install, use composer:
