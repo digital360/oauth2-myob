@@ -3,6 +3,7 @@
 namespace Tenfef\MYOB;
 
 use GuzzleHttp\Psr7\Response;
+use League\OAuth2\Client\Grant\RefreshToken;
 use UnexpectedValueException;
 
 class AccountRightRequest
@@ -33,7 +34,12 @@ class AccountRightRequest
 
     public function fetch($uri): array
     {
-        $options = ['headers' => $this->provider->getHeaders($this->token, $this->username, $this->password)];
+        $token = $this->token;
+        if ($this->token->hasExpired()) {
+            $token = $this->provider > getAccessToken(new RefreshToken(),
+                    ['refresh_token' => $this->token->getRefreshToken()]);
+        }
+        $options = ['headers' => $this->provider->getHeaders($token, $this->username, $this->password)];
         $request = $this->provider->getRequest(Provider::METHOD_GET, $uri, $options);
 
         $response = $this->provider->getParsedResponse($request);
