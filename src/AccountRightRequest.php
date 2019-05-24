@@ -34,12 +34,11 @@ class AccountRightRequest
 
     public function fetch($uri): array
     {
-        $token = $this->token;
         if ($this->token->hasExpired()) {
-            $token = $this->provider > getAccessToken(new RefreshToken(),
+            $this->token = $this->provider > getAccessToken(new RefreshToken(),
                     ['refresh_token' => $this->token->getRefreshToken()]);
         }
-        $options = ['headers' => $this->provider->getHeaders($token, $this->username, $this->password)];
+        $options = ['headers' => $this->provider->getHeaders($this->token, $this->username, $this->password)];
         $request = $this->provider->getRequest(Provider::METHOD_GET, $uri, $options);
 
         $response = $this->provider->getParsedResponse($request);
