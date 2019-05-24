@@ -34,11 +34,7 @@ class AccountRightRequest
 
     public function fetch($uri): array
     {
-        if ($this->token->hasExpired()) {
-            $this->token = $this->provider > getAccessToken(new RefreshToken(),
-                    ['refresh_token' => $this->token->getRefreshToken()]);
-        }
-        $options = ['headers' => $this->provider->getHeaders($this->token, $this->username, $this->password)];
+        $options = ['headers' => $this->provider->getHeaders($this->applyRefreshToken(), $this->username, $this->password)];
         $request = $this->provider->getRequest(Provider::METHOD_GET, $uri, $options);
 
         $response = $this->provider->getParsedResponse($request);
@@ -53,7 +49,7 @@ class AccountRightRequest
 
     public function fetchStream($uri): Response
     {
-        $options = ['headers' => $this->provider->getHeaders($this->token, $this->username, $this->password)];
+        $options = ['headers' => $this->provider->getHeaders($this->applyRefreshToken(), $this->username, $this->password)];
         $request = $this->provider->getRequest(Provider::METHOD_GET, $uri, $options);
 
         return $this->provider->getResponse($request);
@@ -78,5 +74,15 @@ class AccountRightRequest
     {
         return $this->provider->postFullResponse("/accountright/" . $URI, $data, $this->token, $this->username,
             $this->password);
+    }
+
+    private function applyRefreshToken()
+    {
+        if ($this->token->hasExpired()) {
+            $this->token = $this->provider->getAccessToken(new RefreshToken(),
+                ['refresh_token' => $this->token->getRefreshToken()]);
+        }
+
+        return $this->token;
     }
 }
